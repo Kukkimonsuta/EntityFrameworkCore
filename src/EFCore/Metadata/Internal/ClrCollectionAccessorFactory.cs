@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
 using JetBrains.Annotations;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Internal;
 
 namespace Microsoft.EntityFrameworkCore.Metadata.Internal
@@ -21,9 +22,21 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Internal
 
         private static readonly MethodInfo _createAndSet
             = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateAndSet));
-
+               
         private static readonly MethodInfo _create
             = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateCollection));
+
+        private static readonly MethodInfo _createAndSetHashSet
+            = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateAndSetHashSet));
+
+        private static readonly MethodInfo _createHashSet
+            = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateHashSet));
+
+        private static readonly MethodInfo _createAndSetObservableHashSet
+            = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateAndSetObservableHashSet));
+
+        private static readonly MethodInfo _createObservableHashSet
+            = typeof(ClrCollectionAccessorFactory).GetTypeInfo().GetDeclaredMethod(nameof(CreateObservableHashSet));
 
         /// <summary>
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
@@ -110,14 +123,44 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Internal
             {
                 if (setterDelegate != null)
                 {
-                    createAndSetDelegate = (Func<TEntity, Action<TEntity, TCollection>, TCollection>)_createAndSet
-                        .MakeGenericMethod(typeof(TEntity), typeof(TCollection), concreteType)
-                        .CreateDelegate(typeof(Func<TEntity, Action<TEntity, TCollection>, TCollection>));
+                    if (concreteType.IsGenericType && concreteType.GetGenericTypeDefinition() == typeof(HashSet<>))
+                    {
+                        createAndSetDelegate = (Func<TEntity, Action<TEntity, TCollection>, TCollection>)_createAndSetHashSet
+                            .MakeGenericMethod(typeof(TEntity), typeof(TCollection), typeof(TElement))
+                            .CreateDelegate(typeof(Func<TEntity, Action<TEntity, TCollection>, TCollection>));
+                    }
+                    else if (concreteType.IsGenericType && concreteType.GetGenericTypeDefinition() == typeof(ObservableHashSet<>))
+                    {
+                        createAndSetDelegate = (Func<TEntity, Action<TEntity, TCollection>, TCollection>)_createAndSetObservableHashSet
+                            .MakeGenericMethod(typeof(TEntity), typeof(TCollection), typeof(TElement))
+                            .CreateDelegate(typeof(Func<TEntity, Action<TEntity, TCollection>, TCollection>));
+                    }
+                    else
+                    {
+                        createAndSetDelegate = (Func<TEntity, Action<TEntity, TCollection>, TCollection>)_createAndSet
+                            .MakeGenericMethod(typeof(TEntity), typeof(TCollection), concreteType)
+                            .CreateDelegate(typeof(Func<TEntity, Action<TEntity, TCollection>, TCollection>));
+                    }
                 }
 
-                createDelegate = (Func<TCollection>)_create
-                    .MakeGenericMethod(typeof(TCollection), concreteType)
-                    .CreateDelegate(typeof(Func<TCollection>));
+                if (concreteType.IsGenericType && concreteType.GetGenericTypeDefinition() == typeof(HashSet<>))
+                {
+                    createDelegate = (Func<TCollection>)_createHashSet
+                        .MakeGenericMethod(typeof(TCollection), typeof(TElement))
+                        .CreateDelegate(typeof(Func<TCollection>));
+                }
+                else if (concreteType.IsGenericType && concreteType.GetGenericTypeDefinition() == typeof(ObservableHashSet<>))
+                {
+                    createDelegate = (Func<TCollection>)_createObservableHashSet
+                        .MakeGenericMethod(typeof(TCollection), typeof(TElement))
+                        .CreateDelegate(typeof(Func<TCollection>));
+                }
+                else
+                {
+                    createDelegate = (Func<TCollection>)_create
+                        .MakeGenericMethod(typeof(TCollection), concreteType)
+                        .CreateDelegate(typeof(Func<TCollection>));
+                }
             }
 
             return new ClrICollectionAccessor<TEntity, TCollection, TElement>(
@@ -142,5 +185,39 @@ namespace Microsoft.EntityFrameworkCore.Metadata.Internal
             where TCollection : class
             where TConcreteCollection : TCollection, new()
             => new TConcreteCollection();
+
+        [UsedImplicitly]
+        private static TCollection CreateAndSetHashSet<TEntity, TCollection, TElement>(
+            TEntity entity,
+            Action<TEntity, TCollection> setterDelegate)
+            where TEntity : class
+            where TCollection : class
+        {
+            var collection = (TCollection)(ICollection<TElement>)new HashSet<TElement>(ReferenceEqualityComparer<TElement>.Instance);
+            setterDelegate(entity, collection);
+            return collection;
+        }
+
+        [UsedImplicitly]
+        private static TCollection CreateHashSet<TCollection, TElement>()
+            where TCollection : class
+            => (TCollection)(ICollection<TElement>)new HashSet<TElement>(ReferenceEqualityComparer<TElement>.Instance);
+
+        [UsedImplicitly]
+        private static TCollection CreateAndSetObservableHashSet<TEntity, TCollection, TElement>(
+            TEntity entity,
+            Action<TEntity, TCollection> setterDelegate)
+            where TEntity : class
+            where TCollection : class
+        {
+            var collection = (TCollection)(ICollection<TElement>)new ObservableHashSet<TElement>(ReferenceEqualityComparer<TElement>.Instance);
+            setterDelegate(entity, collection);
+            return collection;
+        }
+
+        [UsedImplicitly]
+        private static TCollection CreateObservableHashSet<TCollection, TElement>()
+            where TCollection : class
+            => (TCollection)(ICollection<TElement>)new ObservableHashSet<TElement>(ReferenceEqualityComparer<TElement>.Instance);
     }
 }
